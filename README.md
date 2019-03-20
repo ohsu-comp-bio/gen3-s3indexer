@@ -31,7 +31,7 @@ A docker based gen3 utility that:
 
 ## extensions
 
-* In order to support non-aws s3 stores (ceph, swift, minio,...), we read a new element `endpoint` from fence-config's `S3_BUCKETS` stanzas. This is paired with a small modification to [indexs3client:s3-endpoint] (https://github.com/ohsu-comp-bio/indexs3client/commit/2fd2d303e6023697fc9be78b972076f3dce07949).  Until and if this extension is merged to master, our docker image refers to our branch as `indexs3client:s3-endpoint`
+* In order to support non-aws s3 stores (ceph, swift, minio,...), we read a new element `endpoint` from fence-config's `S3_BUCKETS` stanzas. This is paired with a small modification to [indexs3client:s3-endpoint](https://github.com/ohsu-comp-bio/indexs3client/commit/2fd2d303e6023697fc9be78b972076f3dce07949).  Until and if this extension is merged to master, our docker image refers to our branch as `indexs3client:s3-endpoint`
 
 ## //todo
 
