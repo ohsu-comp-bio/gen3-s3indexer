@@ -112,10 +112,10 @@ if __name__ == '__main__':
     argparser.add_argument('--verbose', help='increase output verbosity', default=False, action='store_true')
     argparser.add_argument('--state_dir',
                            help='store offset pointer file(s) here',
-                           default='/var/www/s3indexer/state')
+                           default='/var/s3indexer/state')
     argparser.add_argument('--config_path',
                            help='read bucket config from here',
-                           default='/var/www/s3indexer/fence-config.yaml'
+                           default='/var/s3indexer/fence-config.yaml'
                            )
 
     args = argparser.parse_args()
