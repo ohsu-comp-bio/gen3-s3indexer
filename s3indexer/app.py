@@ -40,7 +40,7 @@ def get_config_file(fence_config_path):
 
     with open(fence_config_path) as stream:
         fence_config = yaml.load(stream, Loader=yaml.FullLoader)
-        return {'url': fence_config['INDEXD'],
+        return {'url': fence_config['INDEXD'] + '/index',
                 'username': fence_config['INDEXD_USERNAME'],
                 'password': fence_config['INDEXD_PASSWORD']}
 
@@ -132,12 +132,12 @@ if __name__ == '__main__':
     config_file = json.dumps(get_config_file(args.config_path))
     for cred_key in s3_creds.keys():
         s3_cred = s3_creds[cred_key]
+        endpoint_url = s3_cred.get('endpoint_url', None)
         for bucket in s3_cred['buckets']:
 
             # do we have a saved offset
 
             bucket_name = bucket['name']
-            endpoint = bucket.get('endpoint', None)
             offset = get_offset(bucket_name, args.state_dir)
             last_key = None
             if offset:
@@ -145,15 +145,13 @@ if __name__ == '__main__':
                 logger.info('starting from {}'.format(last_key))
             aws_access_key_id = s3_cred['aws_access_key_id']
             aws_secret_access_key = s3_cred['aws_secret_access_key']
-            session = \
-                boto3.Session(aws_access_key_id=aws_access_key_id,
-                              aws_secret_access_key=aws_secret_access_key)
-            endpoint_url = bucket.get('endpoint_url', None)
+            session = boto3.Session(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
             list_objects_api = bucket.get('list_objects_api', 'list_objects')
 
             # support non aws hosts
 
             if endpoint_url:
+                logger.info('endpoint_url {}'.format(endpoint_url))
                 use_ssl = True
                 if endpoint_url.startswith('http://'):
                     use_ssl = False
@@ -162,6 +160,7 @@ if __name__ == '__main__':
                                         config=Config(s3={'addressing_style': 'path'}, signature_version='s3')
                                         )
             else:
+                logger.info('no endpoint_url')
                 client = session.client('s3')
 
             paginator = client.get_paginator(list_objects_api)
@@ -181,16 +180,17 @@ if __name__ == '__main__':
                         logger.debug(page)
                     for record in page.get('Contents', []):
                         input_url = 's3://{}/{}'.format(bucket_name, record['Key'])
-                        if endpoint:
-                            endpoint = \
-                                'AWS_ENDPOINT={}'.format(endpoint)
+                        endpoint_env_var = None
+                        if endpoint_url:
+                            endpoint_env_var= \
+                                'AWS_ENDPOINT={}'.format(endpoint_url)
                         print("AWS_REGION={} AWS_ACCESS_KEY_ID={} AWS_SECRET_ACCESS_KEY={} CONFIG_FILE='{}' INPUT_URL={} {} {}".format(
                             aws_region,
                             aws_access_key_id,
                             aws_secret_access_key,
                             config_file,
                             input_url,
-                            endpoint,
+                            endpoint_env_var,
                             '/indexs3client',
                         ))
                         save_offset({'Key': record['Key']},
