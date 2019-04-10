@@ -8,8 +8,63 @@ import argparse
 from botocore.client import Config
 import yaml
 import json
+import sqlite3
 
 logger = None
+
+
+def get_db_connection(state_dir):
+    """ ensure table and index exists"""
+    def dict_factory(cursor, row):
+        d = {}
+        for idx, col in enumerate(cursor.description):
+            d[col[0]] = row[idx]
+        return d
+    path = os.path.join(state_dir, 'state.db')
+    conn = sqlite3.connect(path)
+    conn.row_factory = dict_factory
+    conn.executescript(
+        '''
+        CREATE TABLE IF NOT EXISTS processed_objects
+            (url text UNIQUE) ;
+
+        CREATE INDEX IF NOT EXISTS processed_objects_idx on
+            processed_objects (url) ;
+        '''
+    )
+    conn.commit()
+    return conn
+
+
+def get_processed(conn, url):
+    """retrieve the record from the db, return none if doesn't exist"""
+    cur = conn.cursor()
+    cur.execute("select * from processed_objects where url = :url", {'url': url})
+    processed_url = cur.fetchone()
+    if not processed_url:
+        return None
+    return processed_url['url']
+
+
+def put_processed(conn, url):
+    """set the record in the db"""
+    cur = conn.cursor()
+    cur.execute("INSERT OR REPLACE into processed_objects values (:url)", url)
+    conn.commit()
+
+
+def last_run(path):
+    """ parse urls and status from last run file"""
+    # 2019/04/05 23:21:50 Finish to compute hashes for /76e05c66-3ea9-412b-8dca-82a33bc6af71/unique-009
+    # 2019/04/05 23:21:50 Finish updating the record. Response Status: 200 OK
+    try:
+        with open(path) as ins:
+            for line in ins:
+                tokens = line.split(' ')
+                if 'Finish to compute hashes' in line:
+                    yield tokens[7]
+    except Exception:
+        pass
 
 
 def get_s3_creds_list(fence_config_path):
@@ -45,61 +100,12 @@ def get_config_file(fence_config_path):
                 'password': fence_config['INDEXD_PASSWORD']}
 
 
-def get_offset(bucket_name, state_dir):
-    """ return offset dict """
-
-    offset = None
-    try:
-        fn = '{}/offset.{}.txt'.format(state_dir, bucket_name)
-        with open(fn) as data_file:
-            offset = {'Key': data_file.read()}
-    except Exception as e:
-        logger.info(e)
-        logger.info('starting from start of bucket')
-        pass
-    return offset
-
-
 def save_offset(offset, bucket_name, state_dir):
     """ save offset dict """
 
     with open('{}/offset.{}.txt'.format(state_dir, bucket_name), 'w'
               ) as data_file:
         data_file.write(offset['Key'])
-
-
-class IndexdHandler(object):
-
-    """Calls  indexs3client to index data."""
-
-    def __init__(self, args=None):
-        super(IndexdHandler, self).__init__()
-        self.state_dir = args.state_dir
-        self.config_path = args.config_path
-
-    def on_any_event(self, endpoint_url, region, bucket_name, record, metadata):
-        try:
-            self.process(endpoint_url, region, bucket_name, record,
-                         metadata)
-            save_offset({'Key': record['Key']}, bucket_name,
-                        args.state_dir)
-        except Exception as e:
-            logger.exception(e)
-
-    def process(self, endpoint_url, region, bucket_name, record, metadata):
-        AWS_REGION = os.environ.get('AWS_REGION', None)
-        AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', None)
-        AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', None)
-        CONFIG_FILE = os.environ.get('CONFIG_FILE', None)
-        INPUT_URL = 's3://{}/{}'.format(bucket_name, record['Key'])
-        print("AWS_REGION={} AWS_ACCESS_KEY_ID={} AWS_SECRET_ACCESS_KEY={} CONFIG_FILE='{}' INPUT_URL={} {}".format(
-            AWS_REGION,
-            AWS_ACCESS_KEY_ID,
-            AWS_SECRET_ACCESS_KEY,
-            CONFIG_FILE,
-            INPUT_URL,
-            '/indexs3client',
-        ))
 
 
 if __name__ == '__main__':
@@ -126,32 +132,24 @@ if __name__ == '__main__':
         logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
     logger = logging.getLogger('s3_inventory')
+    conn = get_db_connection(args.state_dir)
 
-    event_handler = IndexdHandler(args)
+    for url in last_run('./last_run.txt'):
+        put_processed(url)
+
     s3_creds = get_s3_creds_list(args.config_path)
     config_file = json.dumps(get_config_file(args.config_path))
     for cred_key in s3_creds.keys():
         s3_cred = s3_creds[cred_key]
         endpoint_url = s3_cred.get('endpoint_url', None)
         for bucket in s3_cred['buckets']:
-
-            # do we have a saved offset
-
             bucket_name = bucket['name']
-            offset = get_offset(bucket_name, args.state_dir)
-            last_key = None
-            if offset:
-                last_key = offset.get('Key', None)
-                logger.info('starting from {}'.format(last_key))
             aws_access_key_id = s3_cred['aws_access_key_id']
             aws_secret_access_key = s3_cred['aws_secret_access_key']
             session = boto3.Session(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
             list_objects_api = bucket.get('list_objects_api', 'list_objects')
-
             # support non aws hosts
-
             if endpoint_url:
-                logger.info('endpoint_url {}'.format(endpoint_url))
                 use_ssl = True
                 if endpoint_url.startswith('http://'):
                     use_ssl = False
@@ -160,15 +158,10 @@ if __name__ == '__main__':
                                         config=Config(s3={'addressing_style': 'path'}, signature_version='s3')
                                         )
             else:
-                logger.info('no endpoint_url')
                 client = session.client('s3')
 
             paginator = client.get_paginator(list_objects_api)
             pagination_args = {'Bucket': bucket_name}
-            if last_key and list_objects_api == 'list_objects_v2':
-                pagination_args['StartAfter'] = last_key
-            if last_key and list_objects_api == 'list_objects':
-                pagination_args['Marker'] = last_key
             page_iterator = paginator.paginate(**pagination_args)
             try:
                 for page in page_iterator:
@@ -180,10 +173,12 @@ if __name__ == '__main__':
                         logger.debug(page)
                     for record in page.get('Contents', []):
                         input_url = 's3://{}/{}'.format(bucket_name, record['Key'])
+                        processed_url = get_processed(conn, input_url)
+                        if processed_url:
+                            continue
                         endpoint_env_var = None
                         if endpoint_url:
-                            endpoint_env_var= \
-                                'AWS_ENDPOINT={}'.format(endpoint_url)
+                            endpoint_env_var = 'AWS_ENDPOINT={}'.format(endpoint_url)
                         print("AWS_REGION={} AWS_ACCESS_KEY_ID={} AWS_SECRET_ACCESS_KEY={} CONFIG_FILE='{}' INPUT_URL={} {} {}".format(
                             aws_region,
                             aws_access_key_id,
@@ -193,9 +188,6 @@ if __name__ == '__main__':
                             endpoint_env_var,
                             '/indexs3client',
                         ))
-                        save_offset({'Key': record['Key']},
-                                    bucket_name, args.state_dir)
-
                 print('echo done {}'.format(bucket_name))
             except Exception as e:
                 logger.error('Error processing {}'.format(bucket_name))
