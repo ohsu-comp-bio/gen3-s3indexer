@@ -21,6 +21,8 @@ RUN venv/bin/pip install -r requirements.txt
 COPY . .
 COPY boot.sh ./
 RUN chmod +x boot.sh
+RUN venv/bin/pip install -r requirements-dev.txt
+RUN venv/bin/pip install -e .
 
 # we will store ./state (last key read from bucket(s)) here
 # we read ./config (fence yaml) from here
