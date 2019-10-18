@@ -1,5 +1,5 @@
 # FROM quay.io/cdis/indexs3client:master as indexs3client
-FROM indexs3client:s3-endpoint as indexs3client
+FROM onprem/indexs3client as indexs3client
 
 # debian:stretch
 FROM python:3.7-stretch

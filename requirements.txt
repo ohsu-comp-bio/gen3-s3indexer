@@ -1,3 +1,4 @@
-requests
-pyyaml
-psycopg2-binary
+requests==2.22.0
+pyyaml==5.1.2
+psycopg2-binary==2.8.3
+boto3==1.9.253
