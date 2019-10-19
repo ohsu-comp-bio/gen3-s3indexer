@@ -314,6 +314,10 @@ S3_BUCKETS:
     server_side_encryption: false  # defaults to true, used in combination with signature_version
   external-dev:
     cred: 'EXTERNAL_CREDS'
+    extramural_bucket: true  # If set to true, the uploader for all newly indexed objects is set to the S3 bucket owner.
+    extramural_uploader: foo@bar.edu  # If set, the uploader for all newly indexed objects is set to the string value.
+    # extramural_uploader_s3owner:bool  # If set to true, the uploader for all newly indexed objects is set to the S3 bucket owner.
+    # extramural_uploader_manifest:string  # Object path (key) should map to a uploader stored in a CSV file. The first column is the object path (key), the second column is the uploader.
 
 
 # `DATA_UPLOAD_BUCKET` specifies an S3 bucket to which data files are uploaded,

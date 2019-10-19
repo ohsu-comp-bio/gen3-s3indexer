@@ -9,7 +9,7 @@ from s3indexer.common import get_db_connection, get_processed, put_processed, in
 
 def get_external_buckets(fence_config_path):
     buckets = get_buckets(fence_config_path)
-    return [b for b in buckets.values() if not b['is_data_upload']]
+    return [b for b in buckets.values() if 'extramural_bucket' in b]
 
 
 def get_blank_indexd_records_via_db(connection):
@@ -63,7 +63,7 @@ def index(args, logger):
     state_db = get_db_connection(args.state_dir)
     #
     buckets = get_external_buckets(args.config_path)
-    # indexd client creds, render to string so we can pass to indexs3client
+    # indexd client creds
     indexd_config = get_config_file(args.config_path)
     indexd_config['extramural_bucket'] = True
     if len(buckets) == 0:
@@ -74,8 +74,11 @@ def index(args, logger):
         endpoint_url = bucket['credentials'].get('endpoint_url', None)
         aws_access_key_id = bucket['credentials']['aws_access_key_id']
         aws_secret_access_key = bucket['credentials']['aws_secret_access_key']
-        if bucket.get('extramural_uploader', None):
-            indexd_config['extramural_uploader'] = bucket['extramural_uploader']
+        # copy extramural flags into config we pass to indexs3client
+        for k in bucket:
+            if k.startswith('extramural'):
+                indexd_config[k] = bucket[k]
+        # render to string so we can pass to indexs3client
         config_file = json.dumps(indexd_config)
         # iterate through objects
         for record, aws_region in bucket_objects(bucket, logger):
@@ -87,7 +90,7 @@ def index(args, logger):
                 continue
             processed_url = increment(processed_url)
             put_processed(state_db, processed_url)
-            endpoint_env_var = None
+            endpoint_env_var = ''
             if endpoint_url:
                 endpoint_env_var = 'AWS_ENDPOINT={}'.format(endpoint_url)
             echo = ''
@@ -100,7 +103,7 @@ def index(args, logger):
                 aws_secret_access_key,
                 config_file,
                 input_url,
-                endpoint_env_var or '',
+                endpoint_env_var,
                 '/indexs3client',
             ))
         logger.info(f'done external {bucket_name}')
